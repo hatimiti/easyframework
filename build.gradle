@@ -1,0 +1,10 @@
+apply plugin: 'java'
+apply plugin: 'application'
+
+sourceCompatibility = '1.8'
+targetCompatibility = '1.8' 
+
+def jdk8Home = '/Library/Java/JavaVirtualMachines/jdk1.8.0_92.jdk/Contents/Home'
+compileJava.options.bootClasspath = "$jdk8Home/jre/lib/rt.jar"
+
+mainClassName = 'hello.SampleController'
