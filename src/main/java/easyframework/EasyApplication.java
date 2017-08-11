@@ -43,18 +43,32 @@ public class EasyApplication {
      * Package -> https://docs.oracle.com/javase/jp/8/docs/api/java/lang/Package.html
      */
     private static void scanComponents(Class<?> source) {
-        List<Class<?>> classes = scanClasses(source.getPackage().getName());
+        List<Class<?>> classes = scanClassesUnder(source.getPackage().getName());
         classes.stream()
-            .filter(clazz ->
-                clazz.isAnnotationPresent(Component.class)
-                    || clazz.isAnnotationPresent(Controller.class))
-            .forEach(clazz -> uncheck(() -> components.put(clazz, clazz.newInstance())));
+            .filter(clazz -> hasComponentAnnotation(clazz))
+            .forEach(clazz -> uncheck(() -> {
+                Object instance = clazz.newInstance();
+                // Registers by own type.
+                components.put(clazz, instance);
+                // Registers by type of super class.
+                components.put(clazz.getSuperclass(), instance);
+                // Registers by type of interfaces.
+                Arrays.stream(clazz.getInterfaces())
+                    .forEach(intf -> components.put(intf, instance));
+            }));
+        components.remove(Object.class);
+        System.out.println("Registered Components => " + components);
+    }
+
+    private static boolean hasComponentAnnotation(Class<?> clazz) {
+        return clazz.isAnnotationPresent(Component.class)
+                || clazz.isAnnotationPresent(Controller.class);
     }
 
     /**
      * References: http://etc9.hatenablog.com/entry/2015/03/31/001620
      */
-    private static List<Class<?>> scanClasses(String packageName) {
+    private static List<Class<?>> scanClassesUnder(String packageName) {
         String packagePath = packageName.replace('.', '/');
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
         URL root = cl.getResource(packagePath);
@@ -95,7 +109,7 @@ public class EasyApplication {
                         RequestMapping rm = m.getAnnotation(RequestMapping.class);
                         HTTPController c = new HTTPController(rm.value(), kv.getValue(), m);
                         controllers.put(rm.value(), c);
-                        System.out.println("Registered Controller: " + rm.value() + " - " + c);
+                        System.out.println("Registered Controller => " + rm.value() + " - " + c);
                     })
             );
     }
