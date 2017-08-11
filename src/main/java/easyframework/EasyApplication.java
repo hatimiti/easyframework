@@ -7,6 +7,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.Closeable;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URL;
@@ -24,16 +25,17 @@ import javax.annotation.Resource;
 
 public class EasyApplication {
 
-    /** key=classFullName, value=instance */
-    private static Map<Class<?>, Object> components = new HashMap<>();
-    /** key=path, value=instance and method */
-    private static Map<String, HTTPController> controllers = new HashMap<>();
+    /** KEY=the class of the component, VALUE= A instance of the component */
+    private final static Map<Class<?>, Object> components = new HashMap<>();
+
+    /** KEY=path, VALUE= A instance and methods */
+    private final static Map<String, HTTPController> controllers = new HashMap<>();
 
     public static void run(Class<?> clazz, String... args) {
         scanComponents(clazz);
         injectDependencies();
         registerHTTPPaths();
-        processHTTPRequest();
+        startHTTPServer();
     }
 
     /**
@@ -50,7 +52,7 @@ public class EasyApplication {
     }
 
     /**
-     * 参考元: http://etc9.hatenablog.com/entry/2015/03/31/001620
+     * References: http://etc9.hatenablog.com/entry/2015/03/31/001620
      */
     private static List<Class<?>> scanClasses(String packageName) {
         String packagePath = packageName.replace('.', '/');
@@ -93,29 +95,22 @@ public class EasyApplication {
                         RequestMapping rm = m.getAnnotation(RequestMapping.class);
                         HTTPController c = new HTTPController(rm.value(), kv.getValue(), m);
                         controllers.put(rm.value(), c);
-                        System.out.println("Registerd Controller: " + rm.value() + " - " + c);
+                        System.out.println("Registered Controller: " + rm.value() + " - " + c);
                     })
             );
     }
 
-    private static void processHTTPRequest() {
-        try (ServerSocket server = new ServerSocket(8080);
-                Socket socket = server.accept();
-                BufferedReader br = new BufferedReader(
-                    new InputStreamReader(socket.getInputStream(), "UTF-8"))) {
-
-            String path = br.readLine().split(" ")[1];
-            HTTPController c = controllers.get(path);
-            String result = (String) c.method.invoke(c.instance);
-
-            PrintStream os = new PrintStream(socket.getOutputStream());
-            os.println(result);
-            os.flush();
-            os.close();
-
-        } catch (IOException | IllegalAccessException | InvocationTargetException e) {
-            throw new IllegalStateException(e);
-        }
+    private static void startHTTPServer() {
+        EasyHttpServer server = new EasyHttpServer(8080);
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            server.close();
+            // for Debug.
+            //try (java.io.PrintWriter pw = new java.io.PrintWriter(new File("./info.log"))) {
+            //    pw.println("Shutdown server.");
+            //} catch (IOException e) {
+            //}
+        }));
+        server.start();
     }
     
     private static class HTTPController {
@@ -158,5 +153,54 @@ public class EasyApplication {
     @FunctionalInterface
     private static interface ThrowsRunnable {
         void run() throws Exception;
+    }
+
+    private static class EasyHttpServer implements Closeable {
+
+        private final ServerSocket server;
+
+        public EasyHttpServer(int port) {
+            try {
+                this.server = new ServerSocket(port);
+            } catch (IOException e) {
+                close();
+                throw new IllegalStateException(e);
+            }
+        }
+
+        public void start() {
+            while (true) {
+                acceptRequest:
+                try (Socket socket = server.accept();
+                        BufferedReader br = new BufferedReader(
+                            new InputStreamReader(socket.getInputStream(), "UTF-8"))) {
+
+                    // br.readLine() => GET / HTTP/1.1
+                    String path = br.readLine().split(" ")[1];
+                    try (PrintStream os = new PrintStream(socket.getOutputStream())) {
+                        HTTPController c = controllers.get(path);
+                        if (c == null) {
+                            os.println("404 Not Found (path = " + path + " ).");
+                            break acceptRequest;
+                        }
+                        os.println(c.method.invoke(c.instance));
+                    }
+
+                } catch (IOException | IllegalAccessException | InvocationTargetException e) {
+                    throw new IllegalStateException(e);
+                }
+            } 
+        }
+
+        @Override
+        public void close() {
+            try {
+                if (server != null) {
+                    server.close();
+                }
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+        }
     }
 }
