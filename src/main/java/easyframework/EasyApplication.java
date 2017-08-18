@@ -33,6 +33,7 @@ public class EasyApplication {
 
     public static void run(Class<?> clazz, String... args) {
         scanComponents(clazz);
+        registerAOP();
         injectDependencies();
         registerHTTPPaths();
         startHTTPServer();
@@ -112,6 +113,14 @@ public class EasyApplication {
                         System.out.println("Registered Controller => " + rm.value() + " - " + c);
                     })
             );
+    }
+
+    private static void registerAOP() {
+        components.entrySet().stream()
+            .filter(kv -> kv.getKey().isInterface())
+            .forEach(kv -> components.put(kv.getKey(),
+                Interceptor.createProxiedTarget(kv.getValue())));
+        System.out.println("Registered AOP => " + components);
     }
 
     private static void startHTTPServer() {
